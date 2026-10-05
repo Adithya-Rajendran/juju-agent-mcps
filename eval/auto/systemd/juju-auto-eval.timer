@@ -1,0 +1,25 @@
+[Unit]
+Description=6-hourly trigger for juju-agent-mcps auto-eval
+Documentation=https://github.com/Adithya-Rajendran/juju-agent-mcps/blob/main/eval/auto/README.md
+
+[Timer]
+# Fire every 6 hours (00:00, 06:00, 12:00, 18:00 UTC). Four sweeps/day
+# is a comfortable cadence: enough datapoints for the improver
+# routine without needlessly thrashing the model endpoint or the cluster.
+# helper.py pick-fault rotates faults per 6-hour slot; change
+# SWEEP_INTERVAL_HOURS there if you change this schedule.
+OnCalendar=*-*-* 00,06,12,18:00:00 UTC
+
+# Catch up if the eval host was offline at a fire time (e.g. reboot).
+# Limited to one make-up run; we don't want a flood after a long downtime.
+Persistent=true
+
+# Add up to 5min jitter so multiple eval hosts on the same network don't all
+# hit the model endpoint at exactly :00.
+RandomizedDelaySec=5min
+
+# A firing while the previous sweep is still running is a no-op: systemd
+# won't start an active oneshot again, and the wrapper also holds a flock.
+
+[Install]
+WantedBy=timers.target

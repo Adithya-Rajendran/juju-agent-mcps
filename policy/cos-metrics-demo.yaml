@@ -1,0 +1,42 @@
+# cos-metrics policy — DEMO recipe (shorter cycle, more sensitive).
+#
+# This is NOT for production use. It is a faster-firing variant of
+# `policy/cos-metrics.yaml` so the autoscaler demo can show one
+# scale-up + one scale-down inside a 15-minute window.
+#
+# Key differences from the production recipe:
+#   - breach_window: 2m (not 5m) — breach is acted on after 2 min of
+#     sustained high or low, instead of 5. Less anti-flap headroom.
+#   - connection_saturation.threshold_high: 0.50 (not 0.80) — easier to
+#     trip with `pgbench -c 60` instead of `-c 90`.
+#   - connection_saturation.threshold_low: 0.05 (not 0.10) — quicker
+#     drop into low-breach once load stops.
+#   - transaction_rate removed; connection_saturation is the only signal.
+#
+# Use by starting the cos-metrics server (not the autoscaler) with
+#   COS_METRICS_POLICY=$PWD/policy/cos-metrics-demo.yaml
+# The autoscaler reads signals from that server, so exporting the variable
+# only in the autoscaler's environment has no effect.
+
+schema_version: 1
+
+prometheus:
+  url: http://localhost:9090
+
+applications:
+  postgresql:
+    breach_window: 2m
+    min_replicas: 3
+    max_replicas: 7
+    step_up: 1
+    step_down: 1
+    signals:
+      # Only signal in the demo recipe — keeps the gate single-input so a
+      # secondary signal can't block the scale-down.
+      connection_saturation:
+        promql: |
+          max(pg_stat_activity_count{juju_application="postgresql", state="active"})
+          /
+          max(pg_settings_max_connections{juju_application="postgresql"})
+        threshold_high: 0.50
+        threshold_low: 0.05

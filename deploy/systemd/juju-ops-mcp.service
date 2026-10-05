@@ -1,0 +1,22 @@
+[Unit]
+Description=juju-ops MCP server (streamable HTTP on 127.0.0.1:8002/mcp)
+Documentation=https://github.com/Adithya-Rajendran/juju-agent-mcps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/juju-agent-mcps
+Environment=PYTHONUNBUFFERED=1
+Environment=JUJU_OPS_POLICY=%h/juju-agent-mcps/policy/juju-ops.yaml
+# Controller connection settings and secrets (JUJU_CONTROLLER_ENDPOINT,
+# JUJU_USERNAME, JUJU_PASSWORD, JUJU_CACERT or JUJU_CONTROLLER). Owned by
+# this user, chmod 600; start from .env.example. Values in this file
+# override the Environment= lines above.
+EnvironmentFile=%h/.config/juju-ops-mcp.env
+ExecStart=%h/juju-agent-mcps/.venv/bin/juju-ops-mcp --transport streamable-http --host 127.0.0.1 --port 8002
+Restart=on-failure
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

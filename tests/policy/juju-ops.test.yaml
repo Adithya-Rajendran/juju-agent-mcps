@@ -1,0 +1,42 @@
+# juju-ops policy for the test suite. Tests depend on these exact bounds and
+# lists; policy/juju-ops.yaml is the operator's file and may change freely.
+
+schema_version: 1
+
+default_model: sandbox
+
+allowed_models:
+  - sandbox
+
+applications:
+  postgresql:
+    config_allowlist:
+      - max_connections
+      - shared_buffers
+    min_units: 3
+    max_units: 7
+
+  api:
+    config_allowlist:
+      - workers
+    min_units: 1
+    max_units: 6
+
+  # In policy but not deployed in the fake model.
+  redis:
+    config_allowlist:
+      - maxmemory
+    min_units: 0
+    max_units: 3
+
+  grafana-agent:
+    config_allowlist: []
+    min_units: 0
+    max_units: 0
+
+mutations:
+  force_dry_run:
+    - juju_deploy
+    - juju_add_model
+    - juju_integrate
+    - juju_config_set

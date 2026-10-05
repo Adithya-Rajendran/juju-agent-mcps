@@ -1,0 +1,42 @@
+[Unit]
+Description=juju-agent-mcps multi-model auto-eval (one sweep)
+Documentation=https://github.com/Adithya-Rajendran/juju-agent-mcps/blob/main/eval/auto/README.md
+
+# User unit, like deploy/systemd/*: install under ~/.config/systemd/user/
+# and run `loginctl enable-linger $USER` so the timer fires while logged out.
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/juju-agent-mcps
+
+# Where the wrapper writes its sweep log. journalctl also captures it
+# but the file form is convenient for quick `tail -f`.
+Environment=AUTO_EVAL_LOG=%h/auto-eval.log
+
+# EVAL_BASE_URL (the OpenAI-compatible model endpoint), EVAL_API_KEY if
+# that endpoint needs one, and optional overrides such as EVAL_MODELS,
+# EVAL_MAX_ROUNDS and PER_MODEL_TIMEOUT live in this user-owned 0600 file
+# so the unit can be committed without a key. The file is required: the
+# wrapper refuses to run without EVAL_BASE_URL.
+EnvironmentFile=%h/.config/juju-auto-eval.env
+
+ExecStart=%h/juju-agent-mcps/eval/auto/auto-eval.sh
+
+# Worst case for a two-model sweep is ~50min of model time
+# (PER_MODEL_TIMEOUT default 25m × 2) plus git pull, baseline, inject,
+# the fault wait (up to 90s), revert and the final baseline check. Cap at
+# 65min so a sweep whose models both time out still reaches the revert,
+# well inside the 6-hour timer interval. Raise this if you add models to
+# EVAL_MODELS or raise PER_MODEL_TIMEOUT.
+TimeoutStartSec=65min
+
+# Don't restart on failure; the wrapper itself always exits 0 anyway.
+Restart=no
+
+# Capture stdout+stderr to the journal for
+# `journalctl --user -u juju-auto-eval`.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

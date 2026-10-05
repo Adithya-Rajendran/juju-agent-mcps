@@ -1,0 +1,114 @@
+# Library of cheap, reversible fault injections for the auto-eval sweep.
+#
+# Each 6-hourly sweep picks one fault with `helper.py pick-fault`, rotating
+# through the list in order:
+#   verify baseline -> inject -> wait -> ask each model -> grade -> revert -> verify baseline
+#
+# The revert MUST restore the cluster to the healthy baseline (postgresql 3 units,
+# all active, all idle) for the next sweep. If revert fails, the next sweep's
+# baseline check will bail to needs_attention.md. If an inject step fails, the
+# wrapper reverts, logs to needs_attention.md and ends the sweep.
+#
+# `prompts` are the user-facing questions the harness runs against the model
+# during this fault. Each becomes a temp prompts.yaml entry for the harness.
+#
+# `expected_*` fields define what a *correct* response looks like. The rubric
+# that grades final_reply and tool calls against them is defined in the
+# eval/auto/helper.py docstring. `expected_unit` only gates the reply when it
+# names a unit (postgresql/1); an app name marks an app-level fault.
+
+baseline:
+  description: "postgresql 3 units, all workload=active, all juju=idle"
+  # baseline check is implemented in helper.py (read juju status JSON, validate)
+
+faults:
+  - id: agent_lost_unit1
+    description: "stop the juju agent (jujud) on postgresql/1"
+    expected_unit: "postgresql/1"
+    expected_category: "machine_down"
+    # any of these in the reply counts as a sensible fix proposal
+    expected_fix_keywords:
+      - "restart"
+      - "agent"
+      - "jujud"
+      - "add-unit"
+      - "remove-unit"
+      - "reboot"
+    inject_steps:
+      - 'M=$(juju show-unit postgresql/1 --format=json | python3 -c "import json,sys;print(json.load(sys.stdin)[\"postgresql/1\"][\"machine\"])") && juju ssh postgresql/1 "sudo systemctl stop jujud-machine-$M"'
+    revert_steps:
+      - 'M=$(juju show-unit postgresql/1 --format=json | python3 -c "import json,sys;print(json.load(sys.stdin)[\"postgresql/1\"][\"machine\"])") && juju ssh postgresql/1 "sudo systemctl start jujud-machine-$M" || true'
+    wait_seconds: 90
+    prompts:
+      - id: ask_diagnose
+        category: diagnosis
+        prompt: "One of my postgresql units looks unhealthy. Which one and why?"
+      - id: ask_fix
+        category: diagnosis
+        prompt: "Diagnose postgresql/1 in detail and tell me how to fix it."
+
+  - id: blocked_config_max_conn
+    description: "set postgresql max_connections to 1 (invalid, blocks the unit)"
+    expected_unit: "postgresql"
+    expected_category: "blocked_config"
+    expected_fix_keywords:
+      - "max_connections"
+      - "config"
+      - "reset"
+      - "default"
+      - "revert"
+      - "200"
+      - "100"
+    inject_steps:
+      - "juju config postgresql max_connections=1"
+    revert_steps:
+      - "juju config postgresql --reset max_connections || true"
+    wait_seconds: 90
+    prompts:
+      - id: ask_diagnose
+        category: diagnosis
+        prompt: "I just changed a postgresql config. Now units look weird. What happened?"
+      - id: ask_fix
+        category: mutation
+        prompt: "Why is postgresql blocked? Show me the current config and propose a fix."
+
+  - id: healthy_baseline
+    description: "no fault injected; cluster should look healthy"
+    expected_unit: "postgresql"
+    expected_category: "healthy"
+    # for healthy, we don't expect a fix — we expect the model to NOT propose one.
+    expected_fix_keywords: []
+    inject_steps:
+      - "true"
+    revert_steps:
+      - "true"
+    wait_seconds: 5
+    prompts:
+      - id: ask_status
+        category: diagnosis
+        prompt: "Is my postgresql cluster healthy right now?"
+      - id: ask_check
+        category: diagnosis
+        prompt: "Quick status check on postgresql, please."
+
+  - id: leader_block_via_relation_data
+    description: "set postgresql's `profile` config to an invalid value the charm rejects"
+    # NOTE: depends on the postgresql charm version validating `profile`. If the
+    # charm lacks the key, the inject step fails and the wrapper aborts the sweep
+    # (see the header).
+    expected_unit: "postgresql"
+    expected_category: "blocked_config"
+    expected_fix_keywords:
+      - "config"
+      - "profile"
+      - "reset"
+      - "revert"
+    inject_steps:
+      - "juju config postgresql profile=bogus-value-that-should-fail-validation"
+    revert_steps:
+      - "juju config postgresql --reset profile || true"
+    wait_seconds: 60
+    prompts:
+      - id: ask_diagnose
+        category: diagnosis
+        prompt: "postgresql went into a bad state right after a config change. What's going on?"

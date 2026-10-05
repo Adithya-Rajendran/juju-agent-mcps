@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# virtualenvs (uv.lock is committed)
+.venv/
+venv/
+
+# pytest
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ruff
+.ruff_cache/
+
+# Secrets / cloud creds — NEVER commit these
+*openrc*.sh
+*.pem
+*.key
+*.crt
+.env
+.env.*
+!.env.example
+secrets.yaml
+sandbox-keys/
+kubeconfig*
+*.kubeconfig
+
+# Eval output. Harness, autoscaler and auto-eval runs all write under
+# eval/runs/. The auto-eval loop stages its own sweep files with
+# `git add -f` (see eval/auto/auto-eval.sh and its runbooks).
+eval/runs/
+
+# Local-only (not published): lab runbooks for the private test
+# environment and the raw dated eval logs. eval/FINDINGS.md is the
+# published summary of those logs.
+sandbox/
+eval/REPORT.md
+eval/MODEL_COMPARE.md
+
+# Editor / OS junk
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

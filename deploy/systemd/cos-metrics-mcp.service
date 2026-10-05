@@ -1,0 +1,19 @@
+[Unit]
+Description=cos-metrics MCP server (streamable HTTP on 127.0.0.1:8003/mcp)
+Documentation=https://github.com/Adithya-Rajendran/juju-agent-mcps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/juju-agent-mcps
+Environment=PYTHONUNBUFFERED=1
+# Prometheus URL comes from prometheus.url in the policy; set COS_PROM_URL
+# in a drop-in (systemctl --user edit cos-metrics-mcp) to override it.
+Environment=COS_METRICS_POLICY=%h/juju-agent-mcps/policy/cos-metrics.yaml
+ExecStart=%h/juju-agent-mcps/.venv/bin/cos-metrics-mcp --transport streamable-http --host 127.0.0.1 --port 8003
+Restart=on-failure
+RestartSec=5
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

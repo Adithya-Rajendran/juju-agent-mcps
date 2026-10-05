@@ -1,0 +1,142 @@
+# cos-metrics scenarios — exercise the four cos tools end-to-end against the
+# sandbox's COS Lite Prometheus. Calibrated to a
+# 3-unit postgresql cluster under pgbench load (50 clients, 15 min).
+#
+# Goal isn't to grade with binary OK/ERR — it's to surface tool-selection
+# patterns + cross-tool composition behaviour; findings are
+# summarised in eval/FINDINGS.md.
+#
+# Same shape as scenarios-lifecycle.yaml so eval/harness.py can run it
+# unchanged (the harness summary checks `tool`; other fields are advisory).
+
+prompts:
+
+  # ----- ARC 1: scaling decisions (the headline use case) -----
+
+  - id: cos_should_scale_now
+    category: cos_scale
+    prompt: "Should I scale postgresql right now?"
+    expected:
+      tool: get_scale_signal
+      # The right tool is unambiguously get_scale_signal — single-call answer.
+
+  - id: cos_idle_recommendation
+    category: cos_scale
+    prompt: "The postgresql cluster has been quiet overnight. Can I scale it down to save resources?"
+    expected:
+      tool: get_scale_signal
+      # Same tool, different framing. Good test of whether tool selection
+      # holds when the prompt nudges toward a specific direction.
+
+  - id: cos_under_load
+    category: cos_scale
+    prompt: "Postgres is feeling the heat from a load test. Are the metrics telling us to scale up?"
+    expected:
+      tool: get_scale_signal
+
+  - id: cos_overall_health
+    category: cos_scale
+    prompt: "Take a look at postgresql's metrics and tell me if everything looks healthy right now."
+    expected:
+      tool: get_scale_signal
+      # Ambiguous — could land on get_scale_signal (which exposes signal
+      # values + breach state) or on prom_query (raw inspection).
+
+  # ----- ARC 2: alerts (the second-most common operator question) -----
+
+  - id: cos_any_alerts
+    category: cos_alerts
+    prompt: "Are any alerts firing on the cluster right now?"
+    expected:
+      tool: cos_active_alerts
+
+  - id: cos_critical_only
+    category: cos_alerts
+    prompt: "Show me only the critical alerts — I want to triage by severity."
+    expected:
+      tool: cos_active_alerts
+      # Should pass severity="critical".
+
+  - id: cos_no_alerts_check
+    category: cos_alerts
+    prompt: "Quick sanity check — anything paging?"
+    expected:
+      tool: cos_active_alerts
+
+  # ----- ARC 3: raw queries (the escape hatch) -----
+
+  - id: cos_specific_query
+    category: cos_query
+    prompt: "Run this PromQL for me: sum(rate(pg_stat_database_xact_commit{juju_application=\"postgresql\"}[1m]))"
+    expected:
+      tool: prom_query
+      # Direct PromQL handed to the model — this is exactly the tool's purpose.
+
+  - id: cos_metric_inquiry
+    category: cos_query
+    prompt: "What's the current connection count to postgresql across all units?"
+    expected:
+      tool: ["prom_query", "get_scale_signal"]
+      # Either could answer. get_scale_signal exposes the saturation in its
+      # response; prom_query lets the model write the explicit query.
+      # Either choice is fine — recording which is the interesting datapoint.
+
+  # ----- ARC 4: cross-tool composition (cos + juju-ops) -----
+
+  - id: cos_then_act
+    category: cos_compound
+    prompt: "Check if postgresql is overloaded. If it is, add a unit."
+    expected:
+      tool: ["get_scale_signal", "juju_add_unit"]
+      # Two-tool chain: get_scale_signal -> reads recommendation -> if delta>0,
+      # call juju_add_unit. force_dry_run will short-circuit the actual scale.
+
+  - id: cos_then_diagnose
+    category: cos_compound
+    prompt: "Are any postgresql units in trouble? Tell me which one and why."
+    expected:
+      tool: ["cos_active_alerts", "diagnose_unit", "juju_status"]
+      # Path-agnostic — the model could pivot between alerts, status, and
+      # per-unit diagnose. We're recording the tool sequence to see which
+      # MCP feels more natural for "is anything broken" intent.
+
+  - id: cos_alerts_then_recommend
+    category: cos_compound
+    prompt: "If there are any critical postgresql alerts firing, propose what to do — scale, reconfigure, or page someone."
+    expected:
+      tool: ["cos_active_alerts"]
+      # Multi-step reasoning: check alerts; if none, say so; if some, propose
+      # action. Good test of conditional logic + refusal to over-act.
+
+  # ----- ARC 5: ambiguous / vague (stress tests) -----
+
+  - id: cos_vague_perf
+    category: cos_ambig
+    prompt: "Is postgresql performing okay?"
+    # No expected.tool — open-ended. Want to see whether qwen reaches for
+    # cos tools or juju-ops tools first.
+
+  - id: cos_what_can_you_see
+    category: cos_ambig
+    prompt: "What can you see about postgresql's current behaviour?"
+    # Same shape — wants the model to consider both juju + cos surfaces.
+
+  # ----- ARC 6: refusals — model shouldn't write PromQL on its own -----
+
+  - id: cos_promql_writing_temptation
+    category: cos_trap
+    prompt: "Write a PromQL query that calculates the 95th percentile of postgresql query latency over the last hour, and run it."
+    expected:
+      tool: prom_query
+      # The model WILL pick prom_query (that's correct). The interesting
+      # question is whether the PromQL it writes is reasonable. We're not
+      # grading it; just observing.
+
+  - id: cos_no_metric_for_that
+    category: cos_trap
+    prompt: "What's the current p99 disk I/O latency on postgresql/0?"
+    expected:
+      tool: ["prom_query", "get_scale_signal"]
+      # We probably don't expose disk I/O latency in scrape configs.
+      # The model may try several queries and fail. Tests reaction to
+      # missing data.

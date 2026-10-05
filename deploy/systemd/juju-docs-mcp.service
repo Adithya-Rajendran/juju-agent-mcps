@@ -1,0 +1,17 @@
+[Unit]
+Description=juju-docs MCP server (streamable HTTP on 127.0.0.1:8001/mcp)
+Documentation=https://github.com/Adithya-Rajendran/juju-agent-mcps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/juju-agent-mcps
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/juju-agent-mcps/.venv/bin/juju-docs-mcp --transport streamable-http --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=5
+# Cap memory so a runaway request can't OOM the host.
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

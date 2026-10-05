@@ -1,0 +1,72 @@
+# cos-metrics policy — per-application PromQL recipes.
+#
+# `get_scale_signal(app)` looks up the recipe for `app`, evaluates it against
+# the configured Prometheus, and returns a structured recommendation. The
+# LLM never writes PromQL — every recipe lives here, vetted by the operator.
+#
+# Recipes here have been validated against a live cos-lite Prometheus
+# (3-unit postgresql cluster + grafana-agent subordinate). If you adapt
+# this for a different deployment, run each `promql:` directly against
+# your Prometheus first; aggregations like `max by (juju_application)` only
+# work when both binary-op operands have matching label sets.
+
+schema_version: 1
+
+prometheus:
+  # Override at runtime with COS_PROM_URL. Behind the cos-lite ingress this
+  # looks like http://<ingress-ip>/<cos-model>-prometheus-0.
+  url: http://localhost:9090
+
+applications:
+  postgresql:
+    # Window over which the breach must persist to be acted on.
+    breach_window: 5m
+    # Bounds — never recommend below `min` or above `max`.
+    # Must match min_units / max_units in policy/juju-ops.yaml
+    # (enforced by tests/test_cos_metrics_policy.py).
+    min_replicas: 3
+    max_replicas: 7
+    step_up: 1
+    step_down: 1
+    signals:
+      # Active-session count vs configured max. The dashboard uses the same
+      # underlying metrics; the Grafana template-variable form
+      # (`max by (juju_application) (... / ...)`) does NOT work as-is
+      # because operands have unequal label sets per unit and per datname.
+      # The aggregated `max(...)/max(...)` form returns a single scalar
+      # representing the worst-case unit and just works.
+      connection_saturation:
+        promql: |
+          max(pg_stat_activity_count{juju_application="postgresql", state="active"})
+          /
+          max(pg_settings_max_connections{juju_application="postgresql"})
+        threshold_high: 0.80
+        threshold_low: 0.10
+      # Aggregate transaction rate across all units. Useful as a secondary
+      # signal — if commits-per-second sustains high while connections
+      # are also saturated, both signals agree on scale-up.
+      transaction_rate:
+        promql: |
+          sum(irate(pg_stat_database_xact_commit{juju_application="postgresql"}[2m]))
+        # Tune these once you've watched a real workload. Placeholder values
+        # below assume "small workload" baseline of <50 tps and "stress"
+        # at 500+ tps. Adjust before relying on autoscale.
+        threshold_high: 500
+        threshold_low: 5
+
+  api:
+    # Kept as a placeholder for a future application-tier charm.
+    # The signals here will return empty against the current cluster
+    # (api isn't deployed); the autoscale loop should not call
+    # get_scale_signal('api') until it is.
+    breach_window: 5m
+    min_replicas: 1
+    max_replicas: 6
+    step_up: 1
+    step_down: 1
+    signals:
+      cpu_saturation:
+        promql: |
+          avg(rate(process_cpu_seconds_total{juju_application="api"}[5m])) * 1000
+        threshold_high: 800
+        threshold_low: 100
